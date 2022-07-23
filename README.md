@@ -2,8 +2,7 @@
 Dave McMurtrie's 1541 Routines dor the KIM-1<br>
 (c)2022 Dave McMurtrie<br>
 
-!(https://github.com/netzherpes/KIM1541/raw/main/1541l.jpg)[https://github.com/netzherpes/KIM1541/raw/main/1541l.jpg]
-
+![https://github.com/netzherpes/KIM1541/raw/main/1541l.jpg](https://github.com/netzherpes/KIM1541/raw/main/1541l.jpg)
 # Instructions on KIM1541
 
 Get the original Program by Dave McMurtrie here:<br>
