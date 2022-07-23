@@ -1,0 +1,680 @@
+ca65 V2.19 - Git 4f87c7c
+Main file   : .\kim1541_public.s
+Current file: .\kim1541_public.s
+
+000000r 1               
+000000r 1               ;
+000000r 1               ; This code is a subset of the original c64 kernal code.
+000000r 1               ; It has been modified to implement the load and save IEC routines
+000000r 1               ; to be run on a KIM-1 single board computer.
+000000r 1               ; The code assumes a ROM expansion on the KIM-1 at $2000.
+000000r 1               ;
+000000r 1               ; Modified June, 2022 by Dave McMurtrie <dave@commodore.international>
+000000r 1               ; Modified 23. June 2022 by Netzherpes, Just to sstart Code at $A000
+000000r 1               ; <webdoktor@netzherpes.de>
+000000r 1               
+000000r 1               
+000000r 1               STATUS = $90            ;I/O OPERATION STATUS BYTE
+000000r 1               C3P0   = $94            ;IEEE BUFFERED CHAR FLAG
+000000r 1               BSOUR  = $95            ;CHAR BUFFER FOR IEEE
+000000r 1               R2D2   = $A3            ;SERIAL BUS USAGE
+000000r 1               BSOUR1 = $A4            ;TEMP USED BY SERIAL ROUTINE
+000000r 1               COUNT  = $A5            ;TEMP USED BY SERIAL ROUTINE
+000000r 1               FNLEN  = $B7            ;FILENAME LENGTH
+000000r 1               FNADR  = $BB            ;FILENAME ADDRESS
+000000r 1               FA     = $BA            ;FILE PRIMARY ADDRESS
+000000r 1               SA     = $B9            ;FILE SECONDARY ADDRESS
+000000r 1               STAL   = $AA                ;SAVE END ADDR LOW BYTE FOR SAVE ROUTINE
+000000r 1               STAH   = $AB            ;SAVE END ADDR HIGH BYTE FOR SAVE ROUTINE
+000000r 1               SAL    = $AC            ;START ADDR LOW BYTE FOR SAVE ROUTINE
+000000r 1               SAH    = $AD            ;START ADDR HIGH BYTE FOR SAVE ROUTINE
+000000r 1               EAL    = $AE            ;END ADDRESS LOW BYTE
+000000r 1               EAH    = $AF            ;END ADDRESS HIGH BYTE
+000000r 1               MEMUSS = $C3            ;USER SPECIFIED FILE LOAD ADDRESS
+000000r 1               VERCK  = $0A            ;LOAD OR VERIFY FLAG
+000000r 1               SPERR  = 16
+000000r 1               FNAME  = $27            ;FILENAME
+000000r 1               MYSTATUS = $30
+000000r 1                       ;LOCATIONS USED BY THE NATIVE KIM-1 TAPE LOAD AND SAVE ROUTINES.
+000000r 1                       ;I'LL USE THESE FOR DISK LOAD AND SAVE FOR CONSISTENCY OF USER
+000000r 1                       ;EXPERIENCE.
+000000r 1               ID     = $17F9          ;KIM-1 TAPE ID. USE AS FILENAME
+000000r 1               TSAL   = $17F5          ;KIM-1 START ADDRESS LOW BYTE FOR TAPE ROUTINES
+000000r 1               TSAH   = $17F6          ;KIM-1 START ADDRESS HIGH BYTE FOR TAPE ROUTINES
+000000r 1               TEAL   = $17F7          ;KIM-1 END ADDRESS LOW FOR TAPE SAVE
+000000r 1               TEAH   = $17F8          ;KIM-1 END ADDRESS HIGH FOR TAPE SAVE
+000000r 1               
+000000r 1                       ; THE C64 KERNAL USED DC00 AND DD00 6526 ADDRESSES FOR THESE.
+000000r 1                       ; CONVERTED TO USE 6530 LOCATIONS FOR TIMER AND IO TO RUN ON
+000000r 1                       ; A KIM-1.
+000000r 1               PAD    = $1700          ;PERIPHERAL DATA REGISTER A ON KIM-1
+000000r 1               PADD   = $1701          ;PERIPHERAL DATA DIR REGISTER A ON KIM-1
+000000r 1               D2PRA  = $1700          ;PERIPHERAL DATA REGISTER A ON C64
+000000r 1               D2DDRA = $1701          ;PERIPHERAL DATA DIR REGISTER A ON C64
+000000r 1               D1T2H  = $1704          ;1T INTERVAL TIMER ON THE 6530
+000000r 1               D64TH  = $1706          ;64T INTERVAL TIMER ON THE 6530
+000000r 1               D1ICR  = $1707          ;6530 INTERVAL TIMER STATUS REGISTER
+000000r 1               
+000000r 1               		.org $A000   ; TO BE LOADED INTO AN EPROM AND MAPPED IN AT $2000
+00A000  1  D8           LDINIT:  CLD
+00A001  1  78                   SEI
+00A002  1  A9 07                LDA #%00000111
+00A004  1  8D 00 17             STA PAD
+00A007  1  A9 3F                LDA #%00111111
+00A009  1  8D 01 17             STA PADD
+00A00C  1                       ;
+00A00C  1  A9 02                LDA #02        ;LENGTH OF OUR FILENAME IS 2 BYTES
+00A00E  1  85 B7                STA FNLEN
+00A010  1  A9 01                LDA #01        ;SETTING THE SECONDARY ADDR TO 1 CAUSES IT TO USE THE
+00A012  1  85 B9                STA SA         ;FIRST TWO BYTES OF THE FILE AS THE SAVE ADDRESS.
+00A014  1  A9 08                LDA #08        ;THIS IS THE DEVICE NUMBER. HARD CODING 8 FOR NOW.
+00A016  1  85 BA                STA FA
+00A018  1  A9 27                LDA #$27
+00A01A  1  85 BB                STA FNADR
+00A01C  1  A9 00                LDA #$00
+00A01E  1  85 BC                STA FNADR+1
+00A020  1  85 AE                STA EAL
+00A022  1  85 AF                STA EAH
+00A024  1  85 90                STA STATUS
+00A026  1  85 30                STA MYSTATUS
+00A028  1  85 0A                STA VERCK
+00A02A  1                       ;COPY KIM-1 NATIVE TAPE ROUTINE VALUES TO THE C64 KERNAL LOCATIONS
+00A02A  1  AD F5 17             LDA TSAL
+00A02D  1  85 AC                STA SAL
+00A02F  1  AD F6 17             LDA TSAH
+00A032  1  85 AD                STA SAH
+00A034  1               
+00A034  1                       ;********************************
+00A034  1                       ;* C64 KERNAL IEEE LOAD ROUTINE *
+00A034  1                       ;********************************
+00A034  1                       ;LOAD FROM CBM IEEE DEVICE
+00A034  1                       ;
+00A034  1  20 25 A1             JSR CONVID
+00A037  1  A4 B7                LDY FNLEN       ;MUST HAVE FILE NAME
+00A039  1  D0 03                BNE LD25        ;YES...OK
+00A03B  1                       ;
+00A03B  1  4C EF A0             JMP ERROR8      ;MISSING FILE NAME
+00A03E  1                       ;
+00A03E  1  A6 B9        LD25:    LDX SA          ;SAVE SA IN .X
+00A040  1  20 DE A0             JSR LUKING      ;TELL USER LOOKING
+00A043  1  A9 60                LDA #$60        ;SPECIAL LOAD COMMAND
+00A045  1  85 B9                STA SA
+00A047  1  20 AA A0             JSR OPENI       ;OPEN THE FILE
+00A04A  1                       ;
+00A04A  1  A5 BA                LDA FA
+00A04C  1  20 E9 A1             JSR TALK        ;ESTABLISH THE CHANNEL
+00A04F  1  A5 B9                LDA SA
+00A051  1  20 99 A2             JSR TKSA        ;TELL IT TO LOAD
+00A054  1                       ;
+00A054  1  20 E3 A2             JSR ACPTR       ;GET FIRST BYTE
+00A057  1  85 AE                STA EAL
+00A059  1                       ;
+00A059  1  A5 90                LDA STATUS      ;TEST STATUS FOR ERROR
+00A05B  1  4A                   LSR
+00A05C  1  4A                   LSR
+00A05D  1  B0 48                BCS LD90        ;FILE NOT FOUND...
+00A05F  1  20 E3 A2             JSR ACPTR
+00A062  1  85 AF                STA EAH
+00A064  1                       ;
+00A064  1  8A                   TXA             ;FIND OUT OLD SA
+00A065  1  D0 08                BNE LD30        ;SA<>0 USE DISK ADDRESS
+00A067  1  A5 C3                LDA MEMUSS      ;ELSE LOAD WHERE USER WANTS
+00A069  1  85 AE                STA EAL
+00A06B  1  A5 C4                LDA MEMUSS+1
+00A06D  1  85 AF                STA EAH
+00A06F  1  20 F4 A0     LD30:    JSR LODING      ;TELL USER LOADING
+00A072  1                       ;
+00A072  1  A9 FD        LD40:    LDA #$FD        ;MASK OFF TIMEOUT
+00A074  1  25 90                AND STATUS
+00A076  1  85 90                STA STATUS
+00A078  1                       ;
+00A078  1                       ;JSR STOP        ;STOP KEY?
+00A078  1                       ;BNE LD45        ;NO...
+00A078  1                       ;
+00A078  1                       ;JMP BREAK       ;STOP KEY PRESSED
+00A078  1                       ;
+00A078  1  20 E3 A2     LD45:    JSR ACPTR       ;GET BYTE OFF IEEE
+00A07B  1  AA                   TAX
+00A07C  1  A5 90                LDA STATUS      ;WAS THERE A TIMEOUT?
+00A07E  1  4A                   LSR
+00A07F  1  4A                   LSR
+00A080  1  B0 F0                BCS LD40        ;YES...TRY AGAIN
+00A082  1  8A                   TXA
+00A083  1  A4 0A                LDY VERCK       ;PERFORMING VERIFY?
+00A085  1  F0 0C                BEQ LD50        ;NO...LOAD
+00A087  1  A0 00                LDY #0
+00A089  1  D1 AE                CMP (EAL),Y     ;VERIFY IT
+00A08B  1  F0 08                BEQ LD60        ;O.K....
+00A08D  1  A9 10                LDA #SPERR      ;NO GOOD...VERIFY ERROR
+00A08F  1  20 02 A1             JSR UDST        ;UPDATE STATUS
+00A092  1  2C                   .BYTE $2C       ;SKIP NEXT STORE
+00A093  1                       ;
+00A093  1  91 AE        LD50:    STA (EAL),Y
+00A095  1  E6 AE        LD60:    INC EAL         ;INCREMENT STORE ADDR
+00A097  1  D0 02                BNE LD64
+00A099  1  E6 AF                INC EAH
+00A09B  1  24 90        LD64:    BIT STATUS      ;EOI?
+00A09D  1  50 D3                BVC LD40        ;NO...CONTINUE LOAD
+00A09F  1                       ;
+00A09F  1  20 BF A2             JSR UNTLK       ;CLOSE CHANNEL
+00A0A2  1  20 07 A1             JSR CLSEI       ;CLOSE THE FILE
+00A0A5  1  90 77                BCC LD180       ;BRANCH ALWAYS
+00A0A7  1                       ;
+00A0A7  1  4C E5 A0     LD90:   JMP ERROR4      ;FILE NOT FOUND
+00A0AA  1                       ;
+00A0AA  1  A5 B9        OPENI:   LDA SA
+00A0AC  1  30 75                BMI OP175       ;NO SA...DONE
+00A0AE  1               
+00A0AE  1  A4 B7                LDY FNLEN
+00A0B0  1  F0 71                BEQ OP175       ;NO FILE NAME...DONE
+00A0B2  1                       ;
+00A0B2  1  A9 00                LDA #0          ;CLEAR THE SERIAL STATUS
+00A0B4  1  85 90                STA STATUS
+00A0B6  1                       ;
+00A0B6  1  A5 BA                LDA FA
+00A0B8  1  20 EC A1             JSR LISTN       ;DEVICE LA TO LISTEN
+00A0BB  1                       ;
+00A0BB  1  A5 B9                LDA SA
+00A0BD  1  09 F0                ORA #$F0
+00A0BF  1  20 8B A2             JSR SECND
+00A0C2  1                       ;
+00A0C2  1  A5 90                LDA STATUS      ;ANYBODY HOME?
+00A0C4  1  10 05                BPL OP35        ;YES...CONTINUE
+00A0C6  1                       ;
+00A0C6  1                       ;THIS ROUTINE IS CALLED BY OTHER
+00A0C6  1                       ;KERNAL ROUTINES WHICH ARE CALLED
+00A0C6  1                       ;DIRECTLY BY OS.  KILL RETURN
+00A0C6  1                       ;ADDRESS TO RETURN TO OS.
+00A0C6  1                       ;
+00A0C6  1  68                   PLA
+00A0C7  1  68                   PLA
+00A0C8  1  4C EA A0             JMP ERROR5      ;DEVICE NOT PRESENT
+00A0CB  1                       ;
+00A0CB  1  A5 B7        OP35:    LDA FNLEN
+00A0CD  1  F0 0C                BEQ OP45        ;NO NAME...DONE SEQUENCE
+00A0CF  1                       ;
+00A0CF  1                       ;SEND FILE NAME OVER SERIAL
+00A0CF  1                       ;
+00A0CF  1  A0 00                LDY #0
+00A0D1  1  B1 BB        OP40:    LDA (FNADR),Y
+00A0D3  1  20 AD A2             JSR CIOUT
+00A0D6  1  C8                   INY
+00A0D7  1  C4 B7                CPY FNLEN
+00A0D9  1  D0 F6                BNE OP40
+00A0DB  1                       ;
+00A0DB  1  4C 19 A1     OP45:    JMP CUNLSN      ;JSR UNLSN: CLC: RTS
+00A0DE  1                       ;MODIFIED CUNLSN TO BRK INSTEAD OF RTS
+00A0DE  1                       ;
+00A0DE  1                       ;***************************
+00A0DE  1                       ;*HOMEBREW SUPPORT NONSENSE*
+00A0DE  1                       ;***************************
+00A0DE  1  48           LUKING:  PHA
+00A0DF  1  A9 01                LDA #$01
+00A0E1  1  85 30                STA MYSTATUS
+00A0E3  1  68                   PLA
+00A0E4  1  60                   RTS
+00A0E5  1                       ;
+00A0E5  1  A9 04        ERROR4:  LDA #$04
+00A0E7  1  85 30                STA MYSTATUS
+00A0E9  1  00                   BRK
+00A0EA  1                       ;
+00A0EA  1  A9 05        ERROR5:  LDA #$05
+00A0EC  1  85 30                STA MYSTATUS
+00A0EE  1  00                   BRK
+00A0EF  1                       ;
+00A0EF  1  A9 08        ERROR8:  LDA #$08
+00A0F1  1  85 30                STA MYSTATUS
+00A0F3  1  00                   BRK
+00A0F4  1                       ;
+00A0F4  1  48           LODING:  PHA
+00A0F5  1  A9 02                LDA #$02
+00A0F7  1  85 30                STA MYSTATUS
+00A0F9  1  68                   PLA
+00A0FA  1  60                   RTS
+00A0FB  1                       ;
+00A0FB  1  48           SAVING:  PHA
+00A0FC  1  A9 03                LDA #$03
+00A0FE  1  85 30                STA MYSTATUS
+00A100  1  68                   PLA
+00A101  1  60                   RTS
+00A102  1                       ;
+00A102  1  05 90        UDST:    ORA STATUS
+00A104  1  85 90                STA STATUS
+00A106  1  60                   RTS
+00A107  1                       ;
+00A107  1  24 B9        CLSEI:   BIT SA
+00A109  1  30 11                BMI CLSEI2
+00A10B  1  A5 BA                LDA FA
+00A10D  1  20 EC A1             JSR LISTN
+00A110  1  A5 B9                LDA SA
+00A112  1  29 EF                AND #$EF
+00A114  1  09 E0                ORA #$E0
+00A116  1  20 8B A2             JSR SECND
+00A119  1                       ;
+00A119  1  20 CE A2     CUNLSN:  JSR UNLSN       ;ENTRY FOR OPENI
+00A11C  1                       ;
+00A11C  1  18           CLSEI2:  CLC
+00A11D  1  60                   RTS
+00A11E  1                       ;
+00A11E  1  18           LD180:   CLC             ;GOOD EXIT
+00A11F  1                       ;
+00A11F  1                       ; SET UP END LOAD ADDRESS
+00A11F  1                       ;
+00A11F  1  A6 AE                LDX EAL
+00A121  1  A4 AF                LDY EAH
+00A123  1                       ;
+00A123  1  18           OP175:   CLC             ;FLAG GOOD OPEN
+00A124  1                       ;OP180   RTS             ;EXIT IN PEACE
+00A124  1  00           OP180:   BRK
+00A125  1                       ;
+00A125  1                       ;CONVERT TAPE ID TO ASCII AND STORE IN FNAME
+00A125  1                       ;
+00A125  1  48           CONVID:  PHA
+00A126  1  AD F9 17             LDA ID
+00A129  1  4A                   LSR
+00A12A  1  4A                   LSR
+00A12B  1  4A                   LSR
+00A12C  1  4A                   LSR
+00A12D  1  20 3C A1             JSR ASCONV
+00A130  1  85 27                STA FNAME
+00A132  1  AD F9 17             LDA ID
+00A135  1  20 3C A1             JSR ASCONV
+00A138  1  85 28                STA FNAME+1
+00A13A  1  68                   PLA
+00A13B  1  60                   RTS
+00A13C  1                       ;
+00A13C  1                       ;CONVERT LSD OF A TO ASCII
+00A13C  1                       ;
+00A13C  1  29 0F        ASCONV:  AND #$0F
+00A13E  1  C9 0A                CMP #$0A
+00A140  1  18                   CLC
+00A141  1  30 02                BMI HEX1
+00A143  1  69 07                ADC #$07
+00A145  1  69 30        HEX1:    ADC #$30
+00A147  1  60                   RTS
+00A148  1                       ;
+00A148  1                       ;****************
+00A148  1                       ;* SAVE ROUTINE *
+00A148  1                       ;****************
+00A148  1  D8           SVINIT:  CLD
+00A149  1  78                   SEI
+00A14A  1  A9 07                LDA #%00000111
+00A14C  1  8D 00 17             STA PAD
+00A14F  1  A9 3F                LDA #%00111111
+00A151  1  8D 01 17             STA PADD
+00A154  1               
+00A154  1  A9 02                LDA #02   ;LENGTH OF OUR FILENAME IS 2 BYTES
+00A156  1  85 B7                STA FNLEN
+00A158  1  A9 01                LDA #01   ;SETTING THE SECONDARY ADDR (SA) TO 1 CAUSES IT TO USE THE
+00A15A  1  85 B9                STA SA    ;FIRST TWO BYTES OF THE FILE AS THE SAVE ADDRESS.
+00A15C  1  A9 08                LDA #08   ;THIS IS THE DEVICE NUMBER. HARD CODING 8 FOR NOW.
+00A15E  1  85 BA                STA FA
+00A160  1  A9 27                LDA #$27
+00A162  1  85 BB                STA FNADR
+00A164  1  A9 00                LDA #$00
+00A166  1  85 BC                STA FNADR+1
+00A168  1  85 AE                STA EAL
+00A16A  1  85 AF                STA EAH
+00A16C  1  85 90                STA STATUS
+00A16E  1  85 30                STA MYSTATUS
+00A170  1  85 0A                STA VERCK
+00A172  1  20 25 A1             JSR CONVID
+00A175  1               
+00A175  1  AE F7 17     SAVESP:  LDX TEAL
+00A178  1  AC F8 17             LDY TEAH
+00A17B  1  86 AE                STX EAL
+00A17D  1  84 AF                STY EAH
+00A17F  1  AD F5 17             LDA TSAL
+00A182  1  85 AA                STA STAL
+00A184  1  85 AC                STA SAL
+00A186  1  AD F6 17             LDA TSAH
+00A189  1  85 AB                STA STAH
+00A18B  1  85 AD                STA SAH
+00A18D  1                       ;
+00A18D  1               SAVE:
+00A18D  1  A9 61                LDA #$61
+00A18F  1  85 B9                STA SA
+00A191  1  A4 B7                LDY FNLEN
+00A193  1  D0 03                BNE SV25
+00A195  1                       ;
+00A195  1  4C EF A0             JMP ERROR8          ;MISSING FILE NAME
+00A198  1                       ;
+00A198  1  20 AA A0     SV25:    JSR OPENI
+00A19B  1  20 FB A0             JSR SAVING
+00A19E  1  A5 BA                LDA FA
+00A1A0  1  20 EC A1             JSR LISTN
+00A1A3  1  A5 B9                LDA SA
+00A1A5  1  20 8B A2             JSR SECND
+00A1A8  1  A0 00                LDY #0
+00A1AA  1  20 CF A1             JSR RD300
+00A1AD  1  A5 AC                LDA SAL
+00A1AF  1  20 AD A2             JSR CIOUT
+00A1B2  1  A5 AD                LDA SAH
+00A1B4  1  20 AD A2             JSR CIOUT
+00A1B7  1  20 D8 A1     SV30:    JSR CMPSTE      ;COMPARE START TO END
+00A1BA  1  B0 0A                BCS SV50        ;HAVE REACHED END
+00A1BC  1  B1 AC                LDA (SAL),Y
+00A1BE  1  20 AD A2             JSR CIOUT
+00A1C1  1                       ;JSR STOP
+00A1C1  1                       ;BNE SV40
+00A1C1  1                       ;
+00A1C1  1                       ;BREAK   JSR CLSEI
+00A1C1  1                       ;        LDA    #0
+00A1C1  1                       ;        SEC
+00A1C1  1                       ;        RTS
+00A1C1  1                       ;
+00A1C1  1  20 E2 A1     SV40:    JSR INCSAL      ;INCREMENT CURRENT ADDR.
+00A1C4  1  D0 F1                BNE SV30
+00A1C6  1  20 CE A2     SV50:    JSR UNLSN
+00A1C9  1  20 07 A1             JSR CLSEI
+00A1CC  1                       ;
+00A1CC  1  4C 19 A1             JMP CUNLSN
+00A1CF  1                       ;
+00A1CF  1  A5 AB        RD300:   LDA STAH        ; RESTORE STARTING ADDRESS...
+00A1D1  1  85 AD                STA SAH         ;...POINTERS (SAH & SAL)
+00A1D3  1  A5 AA                LDA STAL
+00A1D5  1  85 AC                STA SAL
+00A1D7  1  60                   RTS
+00A1D8  1                       ;COMPARE START AND END LOAD/SAVE
+00A1D8  1                       ;ADDRESSES.  SUBROUTINE CALLED BY
+00A1D8  1                       ;TAPE READ, SAVE, TAPE WRITE
+00A1D8  1                       ;
+00A1D8  1  38           CMPSTE:  SEC
+00A1D9  1  A5 AC                LDA SAL
+00A1DB  1  E5 AE                SBC EAL
+00A1DD  1  A5 AD                LDA SAH
+00A1DF  1  E5 AF                SBC EAH
+00A1E1  1  60                   RTS
+00A1E2  1                       ;
+00A1E2  1  E6 AC        INCSAL:  INC SAL
+00A1E4  1  D0 02                BNE INCR
+00A1E6  1  E6 AD                INC SAH
+00A1E8  1  60           INCR:    RTS
+00A1E9  1                       ;
+00A1E9  1                       ;******************
+00A1E9  1                       ;* SERIAL LIBRARY *
+00A1E9  1                       ;******************
+00A1E9  1                       ;
+00A1E9  1                       ;COMMAND SERIAL BUS DEVICE TO TALK
+00A1E9  1                       ;
+00A1E9  1  09 40        TALK:    ORA #$40        ;MAKE A TALK ADR
+00A1EB  1  2C                   .BYTE $2C       ;SKIP TWO BYTES
+00A1EC  1                       ;
+00A1EC  1                       ;COMMAND SERIAL BUS DEVICE TO LISTEN
+00A1EC  1                       ;
+00A1EC  1  09 20        LISTN:   ORA #$20         ;MAKE A LISTEN ADR
+00A1EE  1                       ; XXX THE CALL TO RSP232 IS NOT NECESSARY ON THE KIM-1
+00A1EE  1                       ;JSR RSP232     ;PROTECT SELF FROM RS232 NMI'S
+00A1EE  1  48           LIST1:   PHA
+00A1EF  1                       ;
+00A1EF  1  24 94                BIT C3P0        ;CHARACTER LEFT IN BUF?
+00A1F1  1  10 0A                BPL LIST2       ;NO...
+00A1F3  1                       ;
+00A1F3  1                       ;SEND BUFFERED CHARACTER
+00A1F3  1                       ;
+00A1F3  1  38                   SEC             ;SET EOI FLAG
+00A1F4  1  66 A3                ROR R2D2
+00A1F6  1                       ;
+00A1F6  1  20 1C A2             JSR ISOUR       ;SEND LAST CHARACTER
+00A1F9  1                       ;
+00A1F9  1  46 94                LSR C3P0        ;BUFFER CLEAR FLAG
+00A1FB  1  46 A3                LSR R2D2        ;CLEAR EOI FLAG
+00A1FD  1                       ;
+00A1FD  1  68           LIST2:   PLA             ;TALK/LISTEN ADDRESS
+00A1FE  1  85 95                STA BSOUR
+00A200  1                       ;SEI
+00A200  1  20 5C A3             JSR DATAHI
+00A203  1  C9 3F                CMP #$3F        ;CLKHI ONLY ON UNLISTEN
+00A205  1  D0 03                BNE LIST5
+00A207  1  20 4A A3             JSR CLKHI
+00A20A  1                       ;
+00A20A  1  AD 00 17     LIST5:   LDA D2PRA       ;ASSERT ATTENTION
+00A20D  1  09 08                ORA #$08
+00A20F  1  8D 00 17             STA D2PRA
+00A212  1                       ;
+00A212  1                       ;ISOURA SEI
+00A212  1  EA           ISOURA:  NOP
+00A213  1  20 53 A3             JSR CLKLO       ;SET CLOCK LINE LOW
+00A216  1  20 5C A3             JSR DATAHI
+00A219  1  20 78 A3             JSR W1MS        ;DELAY 1 MS
+00A21C  1                       ;ISOUR SEI      ;NO IRQS ALLOWED
+00A21C  1  EA           ISOUR:   NOP
+00A21D  1  20 5C A3             JSR DATAHI      ;MAKE SURE DATA IS RELEASED
+00A220  1  20 6E A3             JSR DEBPIA      ;DATA SHOULD BE LOW
+00A223  1  B0 5B                BCS NODEV
+00A225  1  20 4A A3             JSR CLKHI       ;CLOCK LINE HIGH
+00A228  1  24 A3                BIT R2D2        ;EOI FLAG TEST
+00A22A  1  10 0A                BPL NOEOI
+00A22C  1                       ;DO THE EOI
+00A22C  1  20 6E A3     ISR02:   JSR DEBPIA      ;WAIT FOR DATA TO GO HIGH
+00A22F  1  90 FB                BCC ISR02
+00A231  1                       ;
+00A231  1  20 6E A3     ISR03:   JSR DEBPIA      ;WAIT FOR DATA TO GO LOW
+00A234  1  B0 FB                BCS ISR03
+00A236  1                       ;
+00A236  1  20 6E A3     NOEOI:   JSR DEBPIA      ;WAIT FOR DATA HIGH
+00A239  1  90 FB                BCC NOEOI
+00A23B  1  20 53 A3             JSR CLKLO       ;SET CLOCK LOW
+00A23E  1                       ;
+00A23E  1                       ;SET TO SEND DATA
+00A23E  1                       ;
+00A23E  1  A9 08                LDA #$08        ;COUNT 8 BITS
+00A240  1  85 A5                STA COUNT
+00A242  1                       ;
+00A242  1               ISR01:
+00A242  1  AD 00 17             LDA D2PRA       ;DEBOUNCE THE BUS
+00A245  1  CD 00 17             CMP D2PRA
+00A248  1  D0 F8                BNE ISR01
+00A24A  1  0A                   ASL            ;SET THE FLAGS
+00A24B  1  90 36                BCC FRMERR      ;DATA MUST BE HI
+00A24D  1                       ;
+00A24D  1  66 95                ROR BSOUR       ;NEXT BIT INTO CARRY
+00A24F  1  B0 05                BCS ISRHI
+00A251  1  20 65 A3             JSR DATALO
+00A254  1  D0 03                BNE ISRCLK
+00A256  1  20 5C A3     ISRHI:   JSR DATAHI
+00A259  1  20 4A A3     ISRCLK:  JSR CLKHI       ;CLOCK HI
+00A25C  1  EA                   NOP
+00A25D  1  EA                   NOP
+00A25E  1  EA                   NOP
+00A25F  1  EA                   NOP
+00A260  1  AD 00 17             LDA D2PRA
+00A263  1  29 DF                AND #$FF-$20    ;DATA HIGH
+00A265  1  09 10                ORA #$10        ;CLOCK LOW
+00A267  1  8D 00 17             STA D2PRA
+00A26A  1  C6 A5                DEC COUNT
+00A26C  1  D0 D4                BNE ISR01
+00A26E  1  A9 04                LDA #$04        ;SET TIMER FOR 1MS
+00A270  1  8D 04 17             STA D1T2H
+00A273  1                       ;LDA #TIMRB     ;TRIGGER TIMER ; XXX NOT NEEDED ON KIM-1
+00A273  1                       ;STA D1CRB
+00A273  1                       ;LDA D1ICR      ;CLEAR THE TIMER FLAGS<<<<<<<<<<<<<
+00A273  1  AD 07 17     ISR04:   LDA D1ICR
+00A276  1  29 02                AND #$02
+00A278  1  D0 09                BNE FRMERR
+00A27A  1  20 6E A3             JSR DEBPIA
+00A27D  1  B0 F4                BCS ISR04
+00A27F  1                       ;CLI            ;LET IRQS CONTINUE
+00A27F  1  60                   RTS
+00A280  1                       ;
+00A280  1               NODEV:                   ;DEVICE NOT PRESENT ERROR
+00A280  1  A9 80                LDA #$80
+00A282  1  2C                   .BYTE $2C
+00A283  1               FRMERR:                  ;FRAMING ERROR
+00A283  1  A9 03                LDA #$03
+00A285  1  20 02 A1     CSBERR:  JSR UDST        ;COMMODORE SERIAL BUSS ERROR ENTRY
+00A288  1                       ;CLI            ;IRQ'S WERE OFF...TURN ON
+00A288  1  18                   CLC             ;MAKE SURE NO KERNAL ERR
+00A289  1               
+00A289  1  90 48                BCC DLABYE      ;TURN ATN OFF ,RELEASE ALL LINES
+00A28B  1                       ;
+00A28B  1                       ;SEND SECONDARY ADDRESS AFTER LISTEN
+00A28B  1                       ;
+00A28B  1  85 95        SECND:   STA BSOUR        ;BUFFER CHARACTER
+00A28D  1  20 12 A2             JSR ISOURA       ;SEND IT
+00A290  1                       ;RELEASE ATTENTION AFTER LISTEN
+00A290  1                       ;
+00A290  1  AD 00 17     SCATN:   LDA D2PRA
+00A293  1  29 F7                AND #$FF-$08
+00A295  1  8D 00 17             STA D2PRA       ;RELEASE ATTENTION
+00A298  1  60                   RTS
+00A299  1                       ;TALK SECOND ADDRESS
+00A299  1                       ;
+00A299  1  85 95        TKSA:    STA BSOUR       ;BUFFER CHARACTER
+00A29B  1  20 12 A2             JSR ISOURA      ;SEND SECOND ADDR
+00A29E  1               TKATN:                   ;SHIFT OVER TO LISTENER
+00A29E  1                       ;SEI            ;NO IRQ'S HERE
+00A29E  1  20 65 A3             JSR DATALO      ;DATA LINE LOW
+00A2A1  1  20 90 A2             JSR SCATN
+00A2A4  1  20 4A A3             JSR CLKHI       ;CLOCK LINE HIGH JSR/RTS
+00A2A7  1  20 6E A3     TKATN1:  JSR DEBPIA      ;WAIT FOR CLOCK TO GO LOW
+00A2AA  1  30 FB                BMI TKATN1
+00A2AC  1                       ;CLI            ;IRQ'S OKAY NOW
+00A2AC  1  60                   RTS
+00A2AD  1                       ;BUFFERED OUTPUT TO SERIAL BUS
+00A2AD  1                       ;
+00A2AD  1  24 94        CIOUT:  BIT C3P0         ;BUFFERED CHAR?
+00A2AF  1  30 05                BMI CI2         ;YES...SEND LAST
+00A2B1  1                       ;
+00A2B1  1  38                   SEC             ;NO...
+00A2B2  1  66 94                ROR C3P0        ;SET BUFFERED CHAR FLAG
+00A2B4  1  D0 05                BNE CI4         ;BRANCH ALWAYS
+00A2B6  1                       ;
+00A2B6  1  48           CI2:    PHA              ;SAVE CURRENT CHAR
+00A2B7  1  20 1C A2             JSR ISOUR       ;SEND LAST CHAR
+00A2BA  1  68                   PLA             ;RESTORE CURRENT CHAR
+00A2BB  1  85 95        CI4:    STA BSOUR        ;BUFFER CURRENT CHAR
+00A2BD  1  18                   CLC             ;CARRY-GOOD EXIT
+00A2BE  1  60                   RTS
+00A2BF  1                       ;SEND UNTALK COMMAND ON SERIAL BUS
+00A2BF  1                       ;
+00A2BF  1                       ;UNTLK  SEI
+00A2BF  1  EA           UNTLK:   NOP
+00A2C0  1  20 53 A3             JSR CLKLO
+00A2C3  1  AD 00 17             LDA D2PRA       ;PULL ATN
+00A2C6  1  09 08                ORA #$08
+00A2C8  1  8D 00 17             STA D2PRA
+00A2CB  1  A9 5F                LDA #$5F        ;UNTALK COMMAND
+00A2CD  1  2C                   .BYTE $2C       ;SKIP TWO BYTES
+00A2CE  1                       ;SEND UNLISTEN COMMAND ON SERIAL BUS
+00A2CE  1                       ;
+00A2CE  1  A9 3F        UNLSN:  LDA #$3F         ;UNLISTEN COMMAND
+00A2D0  1  20 EE A1             JSR LIST1       ;SEND IT
+00A2D3  1                       ;
+00A2D3  1                       ; RELEASE ALL LINES
+00A2D3  1  20 90 A2     DLABYE: JSR SCATN        ;ALWAYS RELEASE ATN
+00A2D6  1                       ; DELAY THEN RELEASE CLOCK AND DATA
+00A2D6  1                       ;
+00A2D6  1  8A           DLADLH:  TXA             ;DELAY APPROX 60 US
+00A2D7  1  A2 0A                LDX #10
+00A2D9  1  CA           DLAD00:  DEX
+00A2DA  1  D0 FD                BNE DLAD00
+00A2DC  1  AA                   TAX
+00A2DD  1  20 4A A3             JSR CLKHI
+00A2E0  1  4C 5C A3             JMP DATAHI
+00A2E3  1                       ;INPUT A BYTE FROM SERIAL BUS
+00A2E3  1                       ;
+00A2E3  1               ACPTR:
+00A2E3  1  78                   SEI             ;NO IRQ ALLOWED
+00A2E4  1  A9 00                LDA #$00        ;SET EOI/ERROR FLAG
+00A2E6  1  85 A5                STA COUNT
+00A2E8  1  20 4A A3             JSR CLKHI       ;MAKE SURE CLOCK LINE IS RELEASED
+00A2EB  1  20 6E A3     ACP00A:  JSR DEBPIA      ;WAIT FOR CLOCK HIGH
+00A2EE  1  10 FB                BPL ACP00A
+00A2F0  1                       ;
+00A2F0  1               EOIACP:
+00A2F0  1  A9 04                LDA #$04        ;SET TIMER 2 FOR 256US
+00A2F2  1  8D 06 17             STA D64TH
+00A2F5  1                       ;LDA #TIMRB     ; XXX NOT NEEDED ON KIM-1
+00A2F5  1                       ;STA D1CRB
+00A2F5  1  20 5C A3             JSR DATAHI      ;DATA LINE HIGH (MAKES TIMMING MORE LIKE VIC-20
+00A2F8  1                       ;LDA D1ICR      ;CLEAR THE TIMER FLAGS<<<<<<<<<<<<
+00A2F8  1  2C 07 17     ACP00:   BIT D1ICR
+00A2FB  1  30 07                BMI ACP00B      ;RAN OUT.....
+00A2FD  1  20 6E A3             JSR DEBPIA      ;CHECK THE CLOCK LINE
+00A300  1  30 F6                BMI ACP00       ;NO NOT YET
+00A302  1  10 18                BPL ACP01       ;YES.....
+00A304  1                       ;
+00A304  1  A5 A5        ACP00B:  LDA COUNT       ;CHECK FOR ERROR (TWICE THRU TIMEOUTS)
+00A306  1  F0 05                BEQ ACP00C
+00A308  1  A9 02                LDA #2
+00A30A  1  4C 85 A2             JMP CSBERR      ;ST = 2 READ TIMEOUT
+00A30D  1                       ;
+00A30D  1                       ; TIMER RAN OUT DO AN EOI THING
+00A30D  1                       ;
+00A30D  1  20 65 A3     ACP00C:  JSR DATALO      ;DATA LINE LOW
+00A310  1  20 4A A3             JSR CLKHI       ;DELAY AND THEN SET DATAHI (FIX FOR 40US C64)
+00A313  1  A9 40                LDA #$40
+00A315  1  20 02 A1             JSR UDST        ;OR AN EOI BIT INTO STATUS
+00A318  1  E6 A5                INC COUNT       ;GO AROUND AGAIN FOR ERROR CHECK ON EOI
+00A31A  1  D0 D4                BNE EOIACP
+00A31C  1                       ;
+00A31C  1                       ; DO THE BYTE TRANSFER
+00A31C  1                       ;
+00A31C  1  A9 08        ACP01:   LDA #08         ;SET UP COUNTER
+00A31E  1  85 A5                STA COUNT
+00A320  1                       ;
+00A320  1  AD 00 17     ACP03:   LDA D2PRA       ;WAIT FOR CLOCK HIGH
+00A323  1  CD 00 17             CMP D2PRA       ;DEBOUNCE
+00A326  1  D0 F8                BNE ACP03
+00A328  1  0A                   ASL            ;SHIFT DATA INTO CARRY
+00A329  1  10 F5                BPL ACP03       ;CLOCK STILL LOW...
+00A32B  1  66 A4                ROR BSOUR1      ;ROTATE DATA IN
+00A32D  1                       ;
+00A32D  1  AD 00 17     ACP03A:  LDA D2PRA       ;WAIT FOR CLOCK LOW
+00A330  1  CD 00 17             CMP D2PRA       ;DEBOUNCE
+00A333  1  D0 F8                BNE ACP03A
+00A335  1  0A                   ASL
+00A336  1  30 F5                BMI ACP03A
+00A338  1  C6 A5                DEC COUNT
+00A33A  1  D0 E4                BNE ACP03       ;MORE BITS.....
+00A33C  1                       ;...EXIT...
+00A33C  1  20 65 A3             JSR DATALO      ;DATA LOW
+00A33F  1  24 90                BIT STATUS      ;CHECK FOR EOI
+00A341  1  50 03                BVC ACP04       ;NONE...
+00A343  1                       ;
+00A343  1  20 D6 A2             JSR DLADLH      ;DELAY THEN SET DATA HIGH
+00A346  1                       ;
+00A346  1  A5 A4        ACP04:   LDA BSOUR1
+00A348  1                       ;CLI            ;IRQ IS OK
+00A348  1  18                   CLC             ;GOOD EXIT
+00A349  1  60                   RTS
+00A34A  1                       ;
+00A34A  1               CLKHI:                   ;SET CLOCK LINE HIGH (INVERTED)
+00A34A  1  AD 00 17             LDA D2PRA
+00A34D  1  29 EF                AND #$FF-$10
+00A34F  1  8D 00 17             STA D2PRA
+00A352  1  60                   RTS
+00A353  1                       ;
+00A353  1               CLKLO:                   ;SET CLOCK LINE LOW  (INVERTED)
+00A353  1  AD 00 17             LDA D2PRA
+00A356  1  09 10                ORA #$10
+00A358  1  8D 00 17             STA D2PRA
+00A35B  1  60                   RTS
+00A35C  1                       ;
+00A35C  1               DATAHI:                  ;SET DATA LINE HIGH (INVERTED)
+00A35C  1  AD 00 17             LDA D2PRA
+00A35F  1  29 DF                AND #$FF-$20
+00A361  1  8D 00 17             STA D2PRA
+00A364  1  60                   RTS
+00A365  1                       ;
+00A365  1               DATALO:                  ;SET DATA LINE LOW  (INVERTED)
+00A365  1  AD 00 17             LDA D2PRA
+00A368  1  09 20                ORA #$20
+00A36A  1  8D 00 17             STA D2PRA
+00A36D  1  60                   RTS
+00A36E  1                       ;
+00A36E  1  AD 00 17     DEBPIA:  LDA D2PRA       ;DEBOUNCE THE PIA
+00A371  1  CD 00 17             CMP D2PRA
+00A374  1  D0 F8                BNE DEBPIA
+00A376  1  0A                   ASL            ;SHIFT THE DATA BIT INTO THE CARRY...
+00A377  1  60                   RTS             ;...AND THE CLOCK INTO NEG FLAG
+00A378  1                       ;
+00A378  1               W1MS:                    ;DELAY 1MS USING LOOP
+00A378  1  8A                   TXA             ;SAVE .X
+00A379  1  A2 B8                LDX #200-16     ;1000US-(1000/500*8=#40US HOLDS)
+00A37B  1  CA           W1MS1:   DEX             ;5US LOOP
+00A37C  1  D0 FD                BNE W1MS1
+00A37E  1  AA                   TAX             ;RESTORE .X
+00A37F  1  60                   RTS
+00A37F  1               
