@@ -37,8 +37,8 @@ Start:
 	2. Run address $2000 to load from disk.<br>
 
 
-Update: I've also changed one version to be loaded to $A000 for my ROM Module
-Update2: I simply forgot to show how to wire things: 
+Update: I've also changed one version to be loaded to $A000 for my ROM Module<br>
+Update2: I simply forgot to show how to wire things: <br>
 ![https://github.com/netzherpes/KIM1541/blob/main/kim1541.png](https://github.com/netzherpes/KIM1541/blob/main/kim1541.png)
 
 Have fun,<br>
