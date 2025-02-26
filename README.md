@@ -38,6 +38,8 @@ Start:
 
 
 Update: I've also changed one version to be loaded to $A000 for my ROM Module
+Update2: I simply forgot to show how to wire things: 
+![https://github.com/netzherpes/KIM1541/blob/main/kim1541.png](https://github.com/netzherpes/KIM1541/blob/main/kim1541.png)
 
 Have fun,<br>
 webdoc.
